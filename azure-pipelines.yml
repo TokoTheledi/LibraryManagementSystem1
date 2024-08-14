@@ -1,0 +1,113 @@
+trigger:
+  branches:
+    include:
+      - main
+
+stages:
+- stage: Build
+  jobs:
+  - job: BuildJob
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - task: UsePythonVersion@0
+      inputs:
+        versionSpec: '3.x'
+      displayName: 'Use Python 3.x'
+
+    - task: Maven@3
+      inputs:
+        mavenPomFile: 'pom.xml'
+        goals: 'package'
+      displayName: 'Compile the source code'
+      
+    - task: PublishBuildArtifacts@1
+      inputs:
+        PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+        ArtifactName: 'drop'
+        publishLocation: 'Container'
+      displayName: 'Save Build Artifacts'
+    
+    # Notification for Build Failure
+    - task: SendMail@1
+      inputs:
+        To: 'therealonlineprime@gmail.com'
+        Subject: 'Build Failed'
+        Body: 'The build job has failed. Please check the logs in Azure DevOps.'
+      condition: failed()
+      displayName: 'Send Email on Build Failure'
+
+- stage: Test
+  dependsOn: Build
+  jobs:
+  - job: TestJob
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - task: UsePythonVersion@0
+      inputs:
+        versionSpec: '3.x'
+      displayName: 'Use Python 3.x'
+
+    - task: Maven@3
+      inputs:
+        mavenPomFile: 'pom.xml'
+        goals: 'test'
+      displayName: 'Run unit tests'
+      
+    - task: SonarQubePrepare@5
+      inputs:
+        SonarQube: 'SonarQube Service Connection'
+        scannerMode: 'CLI'
+        configMode: 'manual'
+        cliProjectKey: 'YourProjectKey'
+        cliProjectName: 'YourProjectName'
+        cliSources: 'src'
+      displayName: 'Prepare SonarQube Analysis'
+      
+    - task: SonarQubeAnalyze@5
+      displayName: 'Run SonarQube Analysis'
+
+    - task: SonarQubePublish@5
+      inputs:
+        pollingTimeoutSec: '300'
+      displayName: 'Publish SonarQube Results'
+      
+    # Notification for Test Failure
+    - task: SendMail@1
+      inputs:
+        To: 'therealonlineprime@gmail.com'
+        Subject: 'Test Failed'
+        Body: 'The test job has failed. Please check the logs in Azure DevOps.'
+      condition: failed()
+      displayName: 'Send Email on Test Failure'
+
+- stage: Deploy
+  dependsOn: Test
+  jobs:
+  - deployment: DeployToStaging
+    environment: 'Staging'
+    pool:
+      vmImage: 'ubuntu-latest'
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - task: AzureCLI@2
+            inputs:
+              azureSubscription: 'AzureSubscription'
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                echo "Deploying application to staging environment..."
+                # Add your deployment commands here
+            displayName: 'Deploy to Staging'
+      
+          # Notification for Deployment Failure
+          - task: SendMail@1
+            inputs:
+              To: 'therealonlineprime@gmail.com'
+              Subject: 'Deployment Failed'
+              Body: 'The deployment job has failed. Please check the logs in Azure DevOps.'
+            condition: failed()
+            displayName: 'Send Email on Deployment Failure'
